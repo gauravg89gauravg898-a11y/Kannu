@@ -15,7 +15,7 @@ class GeminiClient(
     private val key = apiKey.trim()
 
     // Official Google AI GenerativeModel
-    // gemini-1.5-flash is lightweight, blazing fast on mobile connections, and budget-friendly
+    // gemini-1.5-flash is fast, battery-efficient, and supports native multilingual comprehension
     private val generativeModel: GenerativeModel? by lazy {
         if (key.isBlank() || key == "YOUR_GEMINI_API_KEY_HERE") {
             null
@@ -27,7 +27,7 @@ class GeminiClient(
                     temperature = 0.7f
                     topK = 40
                     topP = 0.95f
-                    maxOutputTokens = 150 // Keep replies snappy and under 2 sentences
+                    maxOutputTokens = 1000 // Enables complete, detailed answers without truncation
                 },
                 systemInstruction = content { text(JarvisPrompt.SYSTEM_INSTRUCTION) }
             )
@@ -40,11 +40,11 @@ class GeminiClient(
     ): Result<String> = withContext(Dispatchers.IO) {
         val model = generativeModel
             ?: return@withContext Result.failure(
-                IllegalStateException("GEMINI_API_KEY is missing or not set in local.properties. Please add GEMINI_API_KEY=your_key to local.properties and rebuild.")
+                IllegalStateException("GEMINI_API_KEY is not configured in local.properties. Please verify your API key.")
             )
 
         try {
-            // Retain last ~10 turns (user & jarvis only) for lightweight mobile context window
+            // Retain last ~10 turns (20 messages max) for deep conversational context retention
             val trimmedHistory = recentHistory
                 .filter { it.sender == MessageSender.USER || it.sender == MessageSender.JARVIS }
                 .takeLast(20)
@@ -55,10 +55,12 @@ class GeminiClient(
                     }
                 }
 
-            // Start chat session with trimmed history
             val chat = model.startChat(history = trimmedHistory)
             val response = chat.sendMessage(userMessage)
-            val responseText = response.text?.trim() ?: "At your service, boss."
+            val responseText = response.text?.trim()
+                ?: return@withContext Result.failure(
+                    IllegalStateException("No response received from Gemini neural core.")
+                )
 
             Result.success(responseText)
         } catch (e: Exception) {

@@ -1,8 +1,10 @@
 package com.nexaos.assistant.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,7 +33,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -40,6 +44,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -49,36 +54,79 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.nexaos.assistant.ui.components.ChatBubble
 import com.nexaos.assistant.ui.components.JarvisArcReactor
 import com.nexaos.assistant.ui.theme.AlertAmber
 import com.nexaos.assistant.ui.theme.ArcBlue
 import com.nexaos.assistant.ui.theme.ArcCyan
+import com.nexaos.assistant.ui.theme.DangerRed
 import com.nexaos.assistant.ui.theme.DeepVoidBlack
 import com.nexaos.assistant.ui.theme.SurfaceDark
 import com.nexaos.assistant.ui.theme.SurfaceDarkCard
 import com.nexaos.assistant.ui.theme.TextMuted
 import com.nexaos.assistant.ui.theme.TextPrimary
+import com.nexaos.assistant.voice.VoiceManager
 
 @Composable
 fun JarvisScreen(
     viewModel: ChatViewModel = viewModel()
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
     var inputQuery by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
-    // Auto-scroll to latest message
+    // Initialize VoiceManager with dual-locale support
+    val voiceManager = remember {
+        VoiceManager(
+            context = context,
+            onResult = { spokenText ->
+                viewModel.sendMessage(spokenText)
+            },
+            onError = { err ->
+                // Handled gracefully without crashing
+            },
+            onListeningStateChanged = { listening ->
+                viewModel.setListeningState(listening)
+            }
+        )
+    }
+
+    // Clean up VoiceManager resources when screen disposes
+    DisposableEffect(voiceManager) {
+        onDispose {
+            voiceManager.destroy()
+        }
+    }
+
+    // Auto-speak new Gemini replies
+    LaunchedEffect(Unit) {
+        viewModel.speakEvent.collect { reply ->
+            voiceManager.speak(reply)
+        }
+    }
+
+    // Auto-scroll when new messages arrive
     LaunchedEffect(uiState.messages.size) {
         if (uiState.messages.isNotEmpty()) {
             listState.animateScrollToItem(uiState.messages.size - 1)
+        }
+    }
+
+    // Permission launcher for microphone recording
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            voiceManager.startListening(uiState.voiceLocale)
         }
     }
 
@@ -104,7 +152,6 @@ fun JarvisScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Glowing status beacon
                     Box(
                         modifier = Modifier
                             .size(10.dp)
@@ -122,27 +169,57 @@ fun JarvisScreen(
                             color = ArcCyan
                         )
                         Text(
-                            text = if (uiState.isConfigured) "PHASE 1: CHAT PROTOCOL ACTIVE" else "API KEY REQUIRED IN LOCAL.PROPERTIES",
+                            text = if (uiState.isListening) "LISTENING TO BOSS..." else if (uiState.isGenerating) "NEURAL REASONING..." else "ONLINE // READY",
                             fontSize = 9.sp,
                             fontFamily = FontFamily.Monospace,
-                            color = if (uiState.isConfigured) TextMuted else AlertAmber
+                            color = if (uiState.isListening) DangerRed else if (uiState.isConfigured) TextMuted else AlertAmber
                         )
                     }
                 }
 
-                IconButton(
-                    onClick = { viewModel.clearChat() }
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.DeleteSweep,
-                        contentDescription = "Clear Chat",
-                        tint = TextMuted
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Voice language switcher (Hindi / English)
+                    IconButton(
+                        onClick = {
+                            val newLocale = if (uiState.voiceLocale == "hi-IN") "en-IN" else "hi-IN"
+                            viewModel.setVoiceLocale(newLocale)
+                        }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .background(SurfaceDarkCard, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Language,
+                                contentDescription = "Language",
+                                tint = ArcCyan,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (uiState.voiceLocale == "hi-IN") "HI" else "EN",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = ArcCyan,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    IconButton(onClick = { viewModel.clearChat() }) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteSweep,
+                            contentDescription = "Clear Chat",
+                            tint = TextMuted
+                        )
+                    }
                 }
             }
         }
 
-        // Mini Arc Reactor Telemetry Bar
+        // Animated Arc Reactor HUD
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -151,7 +228,7 @@ fun JarvisScreen(
         ) {
             JarvisArcReactor(
                 size = 72.dp,
-                isActive = uiState.isGenerating
+                isActive = uiState.isGenerating || uiState.isListening
             )
         }
 
@@ -169,7 +246,7 @@ fun JarvisScreen(
             }
         }
 
-        // Quick Suggestion Chips (Hinglish + English)
+        // Quick Suggestion Chips (Hindi, Hinglish & English)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -178,19 +255,18 @@ fun JarvisScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             val suggestions = listOf(
-                "Nexa, who are you?",
-                "Kaise ho boss?",
+                "Torch on kar do",
+                "Bhai kaise ho?",
+                "Set alarm for 6:30 AM",
                 "What can you do?",
-                "System diagnostics report"
+                "Quantum computing aasan bhasha mein samjhao"
             )
             suggestions.forEach { prompt ->
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = SurfaceDarkCard,
                     border = BorderStroke(1.dp, ArcBlue.copy(alpha = 0.3f)),
-                    modifier = Modifier.clickable {
-                        viewModel.sendMessage(prompt)
-                    }
+                    modifier = Modifier.clickable { viewModel.sendMessage(prompt) }
                 ) {
                     Text(
                         text = prompt,
@@ -202,7 +278,7 @@ fun JarvisScreen(
             }
         }
 
-        // Futuristic Input Bar
+        // Bottom Input Command Bar with Real Mic Listener
         Surface(
             color = SurfaceDark,
             border = BorderStroke(1.dp, ArcCyan.copy(alpha = 0.25f)),
@@ -219,7 +295,7 @@ fun JarvisScreen(
                     onValueChange = { inputQuery = it },
                     placeholder = {
                         Text(
-                            text = "Ask Nexa in English, Hindi, or Hinglish...",
+                            text = "Command in Hindi ('kya haal hai boss') or English...",
                             fontSize = 13.sp,
                             color = TextMuted
                         )
@@ -247,26 +323,39 @@ fun JarvisScreen(
 
                 Spacer(modifier = Modifier.width(6.dp))
 
-                // Phase 2 Voice Mic button indicator
+                // Real Microphone Button (Handles Android runtime permission)
                 IconButton(
                     onClick = {
-                        viewModel.sendMessage("Voice command mode preview: Ready for Phase 2!")
+                        if (uiState.isListening) {
+                            voiceManager.stopListening()
+                        } else {
+                            val hasPermission = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED
+
+                            if (hasPermission) {
+                                voiceManager.startListening(uiState.voiceLocale)
+                            } else {
+                                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        }
                     },
                     modifier = Modifier
                         .size(44.dp)
                         .clip(CircleShape)
-                        .background(SurfaceDarkCard)
+                        .background(if (uiState.isListening) DangerRed else SurfaceDarkCard)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "Voice Input (Phase 2)",
-                        tint = ArcCyan
+                        imageVector = if (uiState.isListening) Icons.Default.MicOff else Icons.Default.Mic,
+                        contentDescription = "Voice Input",
+                        tint = if (uiState.isListening) DeepVoidBlack else ArcCyan
                     )
                 }
 
                 Spacer(modifier = Modifier.width(4.dp))
 
-                // Send button
+                // Send Button
                 IconButton(
                     onClick = {
                         if (inputQuery.isNotBlank()) {

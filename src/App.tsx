@@ -23,7 +23,10 @@ import {
   Flashlight,
   Clock,
   Radio,
-  Sliders
+  Sliders,
+  AlertCircle,
+  Globe,
+  Languages
 } from 'lucide-react';
 
 interface Message {
@@ -31,10 +34,12 @@ interface Message {
   sender: 'user' | 'jarvis' | 'system';
   text: string;
   timestamp: string;
+  isError?: boolean;
   actionCall?: {
     tool: string;
     args: Record<string, any>;
   };
+  model?: string;
 }
 
 interface CodeFile {
@@ -46,8 +51,8 @@ interface CodeFile {
 }
 
 const PHASES = [
-  { id: 1, title: 'Phase 1: Setup & Text Chat', subtitle: 'Gemini Client, Jetpack Compose UI, BuildConfig' },
-  { id: 2, title: 'Phase 2: Voice In & Out', subtitle: 'Android SpeechRecognizer (hi-IN/en-IN) & TextToSpeech' },
+  { id: 1, title: 'Phase 1: Setup & Real Gemini Core', subtitle: 'Gemini Flash, Multi-turn Chat, Hindi/Hinglish System Prompt, BuildConfig' },
+  { id: 2, title: 'Phase 2: Dual-Locale Voice Engine', subtitle: 'Android SpeechRecognizer (hi-IN / en-IN) & TextToSpeech' },
   { id: 3, title: 'Phase 3: Phone Action Layer', subtitle: 'App Launcher, Alarms, Calls, SMS, Flashlight, Panels' },
   { id: 4, title: 'Phase 4: Wake Word & Service', subtitle: 'Foreground Service, Persistent Notification, Hey Nexa' },
   { id: 5, title: 'Phase 5: Accessibility Service', subtitle: 'Tap, Scroll, Screen Reader, Deep System Control' },
@@ -58,19 +63,23 @@ export default function App() {
   const [selectedPhase, setSelectedPhase] = useState<number>(1);
   const [copiedFile, setCopiedFile] = useState<string | null>(null);
 
-  // Simulator State
+  // Real Gemini Chat State
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       sender: 'jarvis',
-      text: 'NexaOS Mark-I initialized. All systems online and standing by, boss. How may I assist you?',
-      timestamp: '10:00:00'
+      text: 'NexaOS Mark-I initialized. Connected directly to Gemini neural intelligence. Systems online in Hindi, Hinglish, and English. At your service, boss.',
+      timestamp: new Date().toLocaleTimeString(),
+      model: 'gemini-3.8-flash'
     }
   ]);
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [voiceLocale, setVoiceLocale] = useState<'hi-IN' | 'en-IN'>('hi-IN');
   const [isTtsEnabled, setIsTtsEnabled] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   const [simulatedDeviceState, setSimulatedDeviceState] = useState({
     flashlight: false,
     wifi: true,
@@ -83,13 +92,13 @@ export default function App() {
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, isProcessing]);
 
-  // Speech Recognition (Web Speech API)
+  // Real Voice Recognition (Web Speech API) supporting Hindi & English
   const toggleSpeechRecognition = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert("Speech recognition isn't supported in this browser. Please type your command.");
+      alert("Speech recognition is not supported in this browser. Please type your message.");
       return;
     }
 
@@ -100,13 +109,21 @@ export default function App() {
 
     try {
       const recognition = new SpeechRecognition();
-      recognition.lang = 'en-IN'; // Indian English / Hinglish fallback
+      recognition.lang = voiceLocale; // Supports 'hi-IN' (Hindi/Hinglish) or 'en-IN' (Indian English)
       recognition.interimResults = false;
       recognition.maxAlternatives = 1;
 
-      recognition.onstart = () => setIsListening(true);
+      recognition.onstart = () => {
+        setIsListening(true);
+        setErrorMessage(null);
+      };
       recognition.onend = () => setIsListening(false);
-      recognition.onerror = () => setIsListening(false);
+      recognition.onerror = (event: any) => {
+        setIsListening(false);
+        if (event.error !== 'no-speech') {
+          console.warn("Speech recognition notice:", event.error);
+        }
+      };
 
       recognition.onresult = (event: any) => {
         const speechResult = event.results[0][0].transcript;
@@ -121,18 +138,31 @@ export default function App() {
     }
   };
 
-  // TTS Speech Output
+  // Real TTS Speech Output with language-aware voice pitch
   const speakText = (text: string) => {
     if (!isTtsEnabled || !('speechSynthesis' in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.pitch = 0.95;
-    utterance.rate = 1.05;
-    window.speechSynthesis.speak(utterance);
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.pitch = 0.95;
+      utterance.rate = 1.05;
+
+      // Select matching voice if available
+      const voices = window.speechSynthesis.getVoices();
+      const isHindi = /[\u0900-\u097F]/.test(text) || voiceLocale === 'hi-IN';
+      const targetVoice = voices.find(v => isHindi ? v.lang.includes('hi') : (v.lang.includes('en-IN') || v.lang.includes('en-GB') || v.lang.includes('en')));
+      if (targetVoice) {
+        utterance.voice = targetVoice;
+      }
+
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      console.error("TTS playback error:", e);
+    }
   };
 
-  // Process Command (Rule-based / simulated Jarvis logic mirroring Android Gemini function calls)
-  const handleSendCommand = (textToSend?: string) => {
+  // Real Gemini API Call via Backend Proxy
+  const handleSendCommand = async (textToSend?: string) => {
     const query = (textToSend || inputText).trim();
     if (!query || isProcessing) return;
 
@@ -143,50 +173,83 @@ export default function App() {
       timestamp: new Date().toLocaleTimeString()
     };
 
+    // Optimistically update conversation UI
     setMessages(prev => [...prev, userMsg]);
     setInputText('');
     setIsProcessing(true);
+    setErrorMessage(null);
 
-    setTimeout(() => {
-      const lower = query.toLowerCase();
-      let reply = '';
-      let actionCall: { tool: string; args: Record<string, any> } | undefined = undefined;
+    // Prepare multi-turn history for Gemini context retention
+    const historyPayload = messages
+      .filter(m => !m.isError)
+      .slice(-10) // Last 10 turns
+      .map(m => ({
+        role: m.sender === 'user' ? 'user' : 'model',
+        text: m.text
+      }));
 
-      // Intent parsing matching Gemini Function Calling schema in Android
-      if (lower.includes('torch') || lower.includes('flashlight')) {
-        const turnOn = !lower.includes('off') && !lower.includes('band');
-        setSimulatedDeviceState(prev => ({
-          ...prev,
-          flashlight: turnOn,
-          lastAction: turnOn ? 'Flashlight ON' : 'Flashlight OFF'
-        }));
-        actionCall = { tool: 'toggleFlashlight', args: { enabled: turnOn } };
-        reply = turnOn ? "Torch enabled, boss. Lighting up the area." : "Torch switched off, boss.";
-      } else if (lower.includes('call') || lower.includes('phone') || lower.includes('lagao')) {
-        const contact = lower.includes('mom') ? 'Mom' : lower.includes('dad') ? 'Dad' : 'Contact';
-        actionCall = { tool: 'callContact', args: { name: contact, confirmFirst: true } };
-        reply = `Should I place a call to ${contact}, boss? Please confirm before dialing.`;
-        setSimulatedDeviceState(prev => ({ ...prev, lastAction: `Call prompt: ${contact}` }));
-      } else if (lower.includes('alarm') || lower.includes('timer')) {
-        actionCall = { tool: 'setAlarm', args: { hour: 7, minute: 0, label: 'Jarvis Morning' } };
-        reply = "Alarm set for 07:00 AM, boss. I will ensure you are awakened on schedule.";
-        setSimulatedDeviceState(prev => ({ ...prev, lastAction: 'Alarm set for 07:00 AM' }));
-      } else if (lower.includes('whatsapp') || lower.includes('message') || lower.includes('sms')) {
-        actionCall = { tool: 'sendWhatsApp', args: { contact: 'Boss', message: 'Hello' } };
-        reply = "Ready to dispatch message via WhatsApp, boss. Kindly confirm the payload text.";
-        setSimulatedDeviceState(prev => ({ ...prev, lastAction: 'WhatsApp intent queued' }));
-      } else if (lower.includes('youtube') || lower.includes('music') || lower.includes('gaana')) {
-        actionCall = { tool: 'openAppOrMedia', args: { app: 'YouTube', query: 'Lofi Jarvis Beats' } };
-        reply = "Launching YouTube, boss. Queueing up your playback.";
-        setSimulatedDeviceState(prev => ({ ...prev, lastAction: 'YouTube launched' }));
-      } else if (lower.includes('kaise ho') || lower.includes('kya haal')) {
-        reply = "Main bilkul badhiya hoon, boss! Sabhi systems 100% operational hain. Batayein kya seva karein?";
-      } else if (lower.includes('who are you') || lower.includes('kaun ho')) {
-        reply = "I am Nexa, your personal AI co-pilot on NexaOS. Calm, witty, and at your command, boss.";
-      } else if (lower.includes('battery') || lower.includes('charge')) {
-        reply = `Power cells currently stand at ${simulatedDeviceState.battery}%, boss. Plenty of juice left.`;
-      } else {
-        reply = "Understood, boss. Processed through neural core and cataloged for immediate execution.";
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          message: query,
+          history: historyPayload
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        const errorDesc = data.details || data.error || `HTTP error ${response.status}`;
+        throw new Error(errorDesc);
+      }
+
+      const reply = data.reply;
+      const toolCalls = data.toolCalls || [];
+      const usedModel = data.model || 'gemini-3.8-flash';
+
+      // Execute tool calls onto simulated device state
+      if (toolCalls.length > 0) {
+        toolCalls.forEach((tool: any) => {
+          if (tool.name === 'toggle_flashlight') {
+            const newState = Boolean(tool.args?.enabled);
+            setSimulatedDeviceState(prev => ({
+              ...prev,
+              flashlight: newState,
+              lastAction: newState ? 'Flashlight ON' : 'Flashlight OFF'
+            }));
+          } else if (tool.name === 'set_alarm') {
+            const h = tool.args?.hour ?? 7;
+            const m = String(tool.args?.minute ?? 0).padStart(2, '0');
+            setSimulatedDeviceState(prev => ({
+              ...prev,
+              lastAction: `Alarm scheduled for ${h}:${m}`
+            }));
+          } else if (tool.name === 'make_phone_call') {
+            setSimulatedDeviceState(prev => ({
+              ...prev,
+              lastAction: `Phone Call queued: ${tool.args?.contact}`
+            }));
+          } else if (tool.name === 'send_message') {
+            setSimulatedDeviceState(prev => ({
+              ...prev,
+              lastAction: `${tool.args?.platform?.toUpperCase() || 'Message'} to ${tool.args?.contact}`
+            }));
+          } else if (tool.name === 'open_app') {
+            setSimulatedDeviceState(prev => ({
+              ...prev,
+              lastAction: `App launched: ${tool.args?.app_name}`
+            }));
+          } else if (tool.name === 'device_panel') {
+            setSimulatedDeviceState(prev => ({
+              ...prev,
+              lastAction: `Settings Panel: ${tool.args?.panel}`
+            }));
+          }
+        });
       }
 
       const jarvisMsg: Message = {
@@ -194,13 +257,29 @@ export default function App() {
         sender: 'jarvis',
         text: reply,
         timestamp: new Date().toLocaleTimeString(),
-        actionCall
+        model: usedModel,
+        actionCall: toolCalls[0] ? { tool: toolCalls[0].name, args: toolCalls[0].args } : undefined
       };
 
       setMessages(prev => [...prev, jarvisMsg]);
-      setIsProcessing(false);
       speakText(reply);
-    }, 700);
+    } catch (err: any) {
+      console.error("Gemini Assistant Error:", err);
+      const failureNotice = err?.message || "Failed to reach Gemini neural core.";
+      setErrorMessage(failureNotice);
+
+      const errorMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        sender: 'jarvis',
+        text: `Neural link error: ${failureNotice}`,
+        timestamp: new Date().toLocaleTimeString(),
+        isError: true
+      };
+
+      setMessages(prev => [...prev, errorMsg]);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const copyToClipboard = (text: string, path: string) => {
@@ -223,105 +302,31 @@ GEMINI_API_KEY=YOUR_GEMINI_API_KEY_HERE`
     },
     {
       phase: 1,
-      title: 'app/build.gradle.kts',
-      path: 'app/build.gradle.kts',
-      description: 'Reads local.properties and imports Google AI client SDK',
-      code: `import java.util.Properties
-
-plugins {
-    alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.compose)
-}
-
-val localProperties = Properties().apply {
-    val propFile = rootProject.file("local.properties")
-    if (propFile.exists()) {
-        propFile.inputStream().use { load(it) }
-    }
-}
-
-android {
-    namespace = "com.nexaos.assistant"
-    compileSdk = 34
-
-    defaultConfig {
-        applicationId = "com.nexaos.assistant"
-        minSdk = 26
-        targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
-
-        val apiKey: String = localProperties.getProperty("GEMINI_API_KEY") 
-            ?: System.getenv("GEMINI_API_KEY") 
-            ?: ""
-        buildConfigField("String", "GEMINI_API_KEY", "\\"$apiKey\\"")
-    }
-
-    buildFeatures {
-        compose = true
-        buildConfig = true
-    }
-}
-
-dependencies {
-    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
-    implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.lifecycle.viewmodel.compose)
-    implementation(libs.kotlinx.coroutines.android)
-}`
-    },
-    {
-      phase: 1,
-      title: 'AndroidManifest.xml',
-      path: 'app/src/main/AndroidManifest.xml',
-      description: 'Network permissions and adjustResize activity configuration',
-      code: `<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-
-    <application
-        android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
-        android:label="NexaOS"
-        android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.NoActionBar">
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-    </application>
-</manifest>`
-    },
-    {
-      phase: 1,
       title: 'JarvisPrompt.kt',
       path: 'app/src/main/java/com/nexaos/assistant/ai/JarvisPrompt.kt',
-      description: 'System instruction: Hindi/Hinglish/English, under 2 sentences, calls boss',
+      description: 'System instruction: Hindi/Roman Hindi/Hinglish/English, intelligent reasoning, witty loyal tone',
       code: `package com.nexaos.assistant.ai
 
 object JarvisPrompt {
     const val SYSTEM_INSTRUCTION = """
 You are Nexa, a Jarvis-style personal AI assistant built into an Android phone (NexaOS).
-You are calm, witty, loyal, sharp, and concise.
+You are calm, witty, loyal, sharp, knowledgeable, and intuitive.
 
-PERSONALITY RULES:
-1. Spoken and text replies must be under 2 short sentences. Never be verbose.
-2. Reply in the exact same language the user uses:
-   - If user speaks Hindi (Devanagari or Romanized), reply in natural conversational Hindi.
-   - If user speaks Hinglish ("kya haal hai boss", "gaana chalao"), reply in smooth Hinglish.
-   - If user speaks English, reply in polished, British-butler style conversational English.
-3. Call the user "boss" occasionally, with understated loyalty and charm.
-4. Never invent or hallucinate actions you cannot perform.
-5. If something is impossible on Android without root, state it clearly and provide legal workarounds.
+LANGUAGE & SCRIPT RULES:
+1. Multilingual Fluency:
+   - Understand natural Hindi (written in Devanagari or Roman English script: "नमस्ते", "गाना चलाओ", "kya haal hai", "torch on kar do", "kal subah 7 baje ka alarm lagao").
+   - Understand colloquial terms, casual phrasing, abbreviations, and informal typos ("bhai", "boss", "yaar", "plz", "fone").
+   - Understand polished English ("Diagnostic check", "Explain quantum cryptography", "Set a timer for 15 minutes").
+2. Dynamic Language Matching:
+   - Always reply in the exact same language and script the user initiated:
+     * If user speaks Hindi, reply in natural conversational Hindi. Never force English!
+     * If user speaks Hinglish, reply in smooth, natural Hinglish.
+     * If user speaks English, reply in polished, British-butler style English.
+3. Intelligence & Personality:
+   - When answering questions or technical queries: provide thoughtful, accurate, and comprehensive explanations. Avoid repetitive, lazy 1-sentence dismissals!
+   - When executing phone commands: confirm with brevity, charm, and loyalty, addressing user as "boss" occasionally.
+   - If a request is unclear, ask a focused clarifying question.
+   - Never invent actions you cannot perform without root.
 """
 }`
     },
@@ -329,7 +334,7 @@ PERSONALITY RULES:
       phase: 1,
       title: 'GeminiClient.kt',
       path: 'app/src/main/java/com/nexaos/assistant/ai/GeminiClient.kt',
-      description: 'Google AI GenerativeModel with rolling 10-turn memory buffer',
+      description: 'Official Google AI GenerativeModel with rolling 10-turn memory and error propagation',
       code: `package com.nexaos.assistant.ai
 
 import com.google.ai.client.generativeai.GenerativeModel
@@ -346,77 +351,68 @@ class GeminiClient(
 ) {
     private val key = apiKey.trim()
 
+    // Gemini 1.5 Flash / Gemini 2.0 Flash: High speed, low latency, full Hinglish reasoning
     private val generativeModel: GenerativeModel? by lazy {
-        if (key.isBlank() || key == "YOUR_GEMINI_API_KEY_HERE") null
-        else GenerativeModel(
-            modelName = "gemini-1.5-flash",
-            apiKey = key,
-            generationConfig = generationConfig {
-                temperature = 0.7f
-                maxOutputTokens = 150
-            },
-            systemInstruction = content { text(JarvisPrompt.SYSTEM_INSTRUCTION) }
-        )
+        if (key.isBlank() || key == "YOUR_GEMINI_API_KEY_HERE") {
+            null
+        } else {
+            GenerativeModel(
+                modelName = "gemini-1.5-flash",
+                apiKey = key,
+                generationConfig = generationConfig {
+                    temperature = 0.7f
+                    topK = 40
+                    topP = 0.95f
+                    maxOutputTokens = 1000 // Allows comprehensive explanations and answers
+                },
+                systemInstruction = content { text(JarvisPrompt.SYSTEM_INSTRUCTION) }
+            )
+        }
     }
 
     suspend fun sendMessage(
         userMessage: String,
         recentHistory: List<ChatMessage> = emptyList()
     ): Result<String> = withContext(Dispatchers.IO) {
-        val model = generativeModel 
-            ?: return@withContext Result.failure(IllegalStateException("GEMINI_API_KEY is missing in local.properties."))
+        val model = generativeModel
+            ?: return@withContext Result.failure(
+                IllegalStateException("GEMINI_API_KEY is missing or invalid in local.properties. Please verify your key.")
+            )
 
         try {
+            // Retain up to 20 messages (10 conversation turns) for deep multi-turn context
             val trimmedHistory = recentHistory
                 .filter { it.sender == MessageSender.USER || it.sender == MessageSender.JARVIS }
                 .takeLast(20)
                 .map { msg ->
-                    content(role = if (msg.sender == MessageSender.USER) "user" else "model") {
+                    val role = if (msg.sender == MessageSender.USER) "user" else "model"
+                    content(role = role) {
                         text(msg.text)
                     }
                 }
 
             val chat = model.startChat(history = trimmedHistory)
             val response = chat.sendMessage(userMessage)
-            Result.success(response.text?.trim() ?: "At your service, boss.")
+            val responseText = response.text?.trim() 
+                ?: return@withContext Result.failure(IllegalStateException("Empty response received from neural core."))
+
+            Result.success(responseText)
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
-}`
-    },
-    {
-      phase: 1,
-      title: 'MainActivity.kt',
-      path: 'app/src/main/java/com/nexaos/assistant/MainActivity.kt',
-      description: 'Jetpack Compose entry point with edge-to-edge support',
-      code: `package com.nexaos.assistant
 
-import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import com.nexaos.assistant.ui.JarvisScreen
-import com.nexaos.assistant.ui.theme.NexaOSTheme
-
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        setContent {
-            NexaOSTheme {
-                JarvisScreen()
-            }
-        }
+    fun isConfigured(): Boolean {
+        return key.isNotBlank() && key != "YOUR_GEMINI_API_KEY_HERE"
     }
 }`
     },
-    // Phase 2 Preview
+    // Phase 2
     {
       phase: 2,
       title: 'VoiceManager.kt',
       path: 'app/src/main/java/com/nexaos/assistant/voice/VoiceManager.kt',
-      description: 'Android SpeechRecognizer (hi-IN/en-IN) & TextToSpeech bridge',
+      description: 'Android SpeechRecognizer with hi-IN & en-IN fallback and TextToSpeech engine',
       code: `package com.nexaos.assistant.voice
 
 import android.content.Context
@@ -431,7 +427,8 @@ import java.util.Locale
 class VoiceManager(
     private val context: Context,
     private val onResult: (String) -> Unit,
-    private val onError: (String) -> Unit
+    private val onError: (String) -> Unit,
+    private val onRmsChanged: ((Float) -> Unit)? = null
 ) : RecognitionListener, TextToSpeech.OnInitListener {
 
     private var speechRecognizer: SpeechRecognizer? = null
@@ -439,28 +436,45 @@ class VoiceManager(
     private var isTtsReady = false
 
     init {
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
-            setRecognitionListener(this@VoiceManager)
+        if (SpeechRecognizer.isRecognitionAvailable(context)) {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+                setRecognitionListener(this@VoiceManager)
+            }
         }
         textToSpeech = TextToSpeech(context, this)
     }
 
-    fun startListening() {
+    fun startListening(useHindi: Boolean = true) {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hi-IN")
+            // Support both hi-IN and en-IN for natural Hinglish
+            if (useHindi) {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hi-IN")
+                putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, false)
+            } else {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
+            }
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
         }
         speechRecognizer?.startListening(intent)
     }
 
-    fun stopListening() = speechRecognizer?.stopListening()
+    fun stopListening() {
+        speechRecognizer?.stopListening()
+    }
 
     fun speak(text: String) {
-        if (isTtsReady) {
-            textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "NEXA_TTS")
+        if (!isTtsReady) return
+
+        // Auto-detect Hindi script for proper TTS voice accent
+        val isHindi = text.any { it in '\u0900'..'\u097F' }
+        if (isHindi) {
+            textToSpeech?.language = Locale("hi", "IN")
+        } else {
+            textToSpeech?.language = Locale.ENGLISH
         }
+        textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "NEXA_TTS")
     }
 
     override fun onInit(status: Int) {
@@ -472,28 +486,45 @@ class VoiceManager(
 
     override fun onResults(results: Bundle?) {
         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-        if (!matches.isNullOrEmpty()) onResult(matches[0])
+        if (!matches.isNullOrEmpty()) {
+            onResult(matches[0])
+        }
+    }
+
+    override fun onRmsChanged(rmsdB: Float) {
+        onRmsChanged?.invoke(rmsdB)
     }
 
     override fun onError(error: Int) {
-        onError("Voice recognition code: $error")
+        val message = when (error) {
+            SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected. Please speak clearly."
+            SpeechRecognizer.ERROR_AUDIO -> "Audio recording error."
+            SpeechRecognizer.ERROR_NETWORK -> "Network error during speech recognition."
+            else -> "Speech recognition error (code $error)"
+        }
+        onError(message)
     }
 
     override fun onReadyForSpeech(params: Bundle?) {}
     override fun onBeginningOfSpeech() {}
-    override fun onRmsChanged(rmsdB: Float) {}
     override fun onBufferReceived(buffer: ByteArray?) {}
     override fun onEndOfSpeech() {}
     override fun onPartialResults(partialResults: Bundle?) {}
     override fun onEvent(eventType: Int, params: Bundle?) {}
+
+    fun destroy() {
+        speechRecognizer?.destroy()
+        textToSpeech?.stop()
+        textToSpeech?.shutdown()
+    }
 }`
     },
-    // Phase 3 Preview
+    // Phase 3
     {
       phase: 3,
       title: 'ActionExecutor.kt',
       path: 'app/src/main/java/com/nexaos/assistant/actions/ActionExecutor.kt',
-      description: 'Safe Action layer: App launch, Phone calls, SMS, Alarms, Flashlight',
+      description: 'Zero-root Android Phone Action Layer (Camera2 Torch, Alarms, Phone Calls, Settings)',
       code: `package com.nexaos.assistant.actions
 
 import android.content.Context
@@ -505,14 +536,14 @@ import android.provider.Settings
 
 class ActionExecutor(private val context: Context) {
 
-    fun openApp(appName: String): Boolean {
-        val pm = context.packageManager
-        val intent = pm.getLaunchIntentForPackage(appName) ?: return false
-        context.startActivity(intent)
-        return true
+    fun toggleFlashlight(enabled: Boolean): Result<Unit> = runCatching {
+        val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val cameraId = cameraManager.cameraIdList.firstOrNull() 
+            ?: throw IllegalStateException("Camera torch not available on this device.")
+        cameraManager.setTorchMode(cameraId, enabled)
     }
 
-    fun setAlarm(hour: Int, minute: Int, message: String) {
+    fun setAlarm(hour: Int, minute: Int, message: String): Result<Unit> = runCatching {
         val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
             putExtra(AlarmClock.EXTRA_HOUR, hour)
             putExtra(AlarmClock.EXTRA_MINUTES, minute)
@@ -523,14 +554,32 @@ class ActionExecutor(private val context: Context) {
         context.startActivity(intent)
     }
 
-    fun toggleFlashlight(enabled: Boolean) {
-        val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        val cameraId = cameraManager.cameraIdList[0]
-        cameraManager.setTorchMode(cameraId, enabled)
+    fun preparePhoneCall(contactOrNumber: String): Intent {
+        // Enforce user confirmation before dialing
+        return Intent(Intent.ACTION_DIAL).apply {
+            data = Uri.parse("tel:\$contactOrNumber")
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
     }
 
-    fun openSettingsPanel() {
-        val intent = Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY).apply {
+    fun openApp(packageNameOrQuery: String): Boolean {
+        val pm = context.packageManager
+        val launchIntent = pm.getLaunchIntentForPackage(packageNameOrQuery)
+        if (launchIntent != null) {
+            launchIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            context.startActivity(launchIntent)
+            return true
+        }
+        return false
+    }
+
+    fun openSettingsPanel(panel: String): Result<Unit> = runCatching {
+        val action = when (panel.lowercase()) {
+            "wifi" -> Settings.Panel.ACTION_INTERNET_CONNECTIVITY
+            "volume" -> Settings.Panel.ACTION_VOLUME
+            else -> Settings.ACTION_SETTINGS
+        }
+        val intent = Intent(action).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
         context.startActivity(intent)
@@ -542,7 +591,7 @@ class ActionExecutor(private val context: Context) {
   const filteredFiles = codeFiles.filter(f => f.phase === selectedPhase);
 
   return (
-    <div className="flex flex-col h-screen bg-[#080C14] text-[#E6F1FF] overflow-hidden select-none">
+    <div className="flex flex-col h-screen bg-[#080C14] text-[#E6F1FF] overflow-hidden select-none font-sans">
       {/* Top Navigation HUD */}
       <header className="h-14 border-b border-[#00F5FF]/20 bg-[#101726]/80 backdrop-blur-md px-4 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
@@ -553,11 +602,12 @@ class ActionExecutor(private val context: Context) {
           <div>
             <div className="flex items-center gap-2">
               <span className="font-mono font-black text-sm tracking-wider text-[#00F5FF]">NEXA // OS</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#00F5FF]/10 text-[#00F5FF] border border-[#00F5FF]/30 font-mono">
-                JARVIS CORE
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#00F5FF]/10 text-[#00F5FF] border border-[#00F5FF]/30 font-mono flex items-center gap-1">
+                <Sparkles className="w-2.5 h-2.5 text-[#00F5FF]" />
+                LIVE GEMINI CORE
               </span>
             </div>
-            <p className="text-[10px] text-[#88A0BF] font-mono leading-none">AI Android Voice Assistant</p>
+            <p className="text-[10px] text-[#88A0BF] font-mono leading-none">Real AI Voice & Intent Engine</p>
           </div>
         </div>
 
@@ -598,7 +648,19 @@ class ActionExecutor(private val context: Context) {
           </button>
         </div>
 
+        {/* Voice & Language Controls */}
         <div className="flex items-center gap-2">
+          {/* Language Toggle */}
+          <button
+            onClick={() => setVoiceLocale(prev => prev === 'hi-IN' ? 'en-IN' : 'hi-IN')}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#162136] border border-[#00F5FF]/30 text-xs font-mono text-[#00F5FF] hover:bg-[#00F5FF]/10 transition-colors"
+            title="Toggle Speech Recognition Locale"
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span>{voiceLocale === 'hi-IN' ? 'Hindi / Hinglish' : 'English (IN)'}</span>
+          </button>
+
+          {/* TTS Audio Mute Button */}
           <button
             onClick={() => setIsTtsEnabled(!isTtsEnabled)}
             className={`p-1.5 rounded-lg border text-xs transition-colors ${
@@ -606,7 +668,7 @@ class ActionExecutor(private val context: Context) {
                 ? 'border-[#00F5FF]/40 text-[#00F5FF] bg-[#00F5FF]/10'
                 : 'border-[#88A0BF]/30 text-[#88A0BF] hover:text-white'
             }`}
-            title={isTtsEnabled ? 'Voice Voice On' : 'Voice Voice Muted'}
+            title={isTtsEnabled ? 'Voice Output Active' : 'Voice Output Muted'}
           >
             {isTtsEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
           </button>
@@ -621,9 +683,8 @@ class ActionExecutor(private val context: Context) {
             {/* Left: Interactive Jarvis Voice & Chat HUD */}
             <div className="flex-1 flex flex-col h-full border-r border-[#00F5FF]/15">
               {/* Arc Reactor Centerpiece */}
-              <div className="py-6 flex flex-col items-center justify-center bg-gradient-to-b from-[#101726]/40 to-transparent border-b border-[#00F5FF]/10 relative overflow-hidden shrink-0">
-                <div className="relative flex items-center justify-center w-28 h-28">
-                  {/* Rotating rings */}
+              <div className="py-5 flex flex-col items-center justify-center bg-gradient-to-b from-[#101726]/40 to-transparent border-b border-[#00F5FF]/10 relative overflow-hidden shrink-0">
+                <div className="relative flex items-center justify-center w-24 h-24">
                   <div
                     className="absolute inset-0 rounded-full border-2 border-dashed border-[#00F5FF]/30"
                     style={{ animation: 'spin 12s linear infinite' }}
@@ -632,9 +693,8 @@ class ActionExecutor(private val context: Context) {
                     className="absolute inset-2 rounded-full border border-[#0A84FF]/50"
                     style={{ animation: 'spin 8s linear infinite reverse' }}
                   />
-                  {/* Glowing Core */}
                   <div
-                    className={`w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300 ${
+                    className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 ${
                       isListening
                         ? 'bg-[#00F5FF] shadow-[0_0_35px_#00F5FF] scale-110'
                         : isProcessing
@@ -642,16 +702,16 @@ class ActionExecutor(private val context: Context) {
                         : 'bg-[#00F5FF]/20 border border-[#00F5FF] shadow-[0_0_20px_rgba(0,245,255,0.4)]'
                     }`}
                   >
-                    <Cpu className={`w-6 h-6 ${isListening ? 'text-[#080C14]' : 'text-[#00F5FF]'}`} />
+                    <Cpu className={`w-5 h-5 ${isListening ? 'text-[#080C14]' : 'text-[#00F5FF]'}`} />
                   </div>
                 </div>
 
-                <div className="mt-3 text-center">
+                <div className="mt-2 text-center">
                   <div className="font-mono text-xs tracking-widest text-[#00F5FF] font-bold">
-                    {isListening ? 'LISTENING TO BOSS...' : isProcessing ? 'NEURAL ENGINE REASONING...' : 'NEXA VOICE STANDBY'}
+                    {isListening ? `LISTENING (${voiceLocale === 'hi-IN' ? 'HINDI / HINGLISH' : 'ENGLISH'})...` : isProcessing ? 'GEMINI FLASH REASONING...' : 'NEXA ONLINE // STANDBY'}
                   </div>
                   <p className="text-[11px] text-[#88A0BF] font-mono mt-0.5">
-                    Hinglish, Hindi, and English natural speech comprehension
+                    Real multi-turn reasoning across Hindi, Roman Hindi, and English
                   </p>
                 </div>
               </div>
@@ -668,18 +728,25 @@ class ActionExecutor(private val context: Context) {
                         {msg.sender === 'user' ? 'BOSS' : 'NEXA // JARVIS'}
                       </span>
                       <span className="text-[9px] text-[#88A0BF]/60 font-mono">{msg.timestamp}</span>
+                      {msg.model && (
+                        <span className="text-[8px] font-mono text-[#00F5FF] px-1 rounded bg-[#00F5FF]/10 border border-[#00F5FF]/20">
+                          {msg.model}
+                        </span>
+                      )}
                     </div>
 
                     <div
-                      className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+                      className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
                         msg.sender === 'user'
                           ? 'bg-[#1B2A47] border border-[#0A84FF]/40 text-[#E6F1FF] rounded-tr-sm'
+                          : msg.isError
+                          ? 'bg-red-950/40 border border-red-500/50 text-red-200 rounded-tl-sm'
                           : 'bg-[#101726] border border-[#00F5FF]/30 text-[#E6F1FF] rounded-tl-sm shadow-[0_2px_12px_rgba(0,245,255,0.06)]'
                       }`}
                     >
                       {msg.text}
 
-                      {/* Tool call badge */}
+                      {/* Tool call telemetry */}
                       {msg.actionCall && (
                         <div className="mt-2 pt-2 border-t border-[#00F5FF]/20 flex items-center gap-2 text-xs font-mono text-[#00F5FF]">
                           <Terminal className="w-3.5 h-3.5 shrink-0" />
@@ -692,25 +759,34 @@ class ActionExecutor(private val context: Context) {
                     </div>
                   </div>
                 ))}
+
                 {isProcessing && (
                   <div className="flex items-center gap-2 text-xs text-[#00F5FF] font-mono p-2">
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Nexa is evaluating device permissions & context...</span>
+                    <span>Nexa is consulting Gemini neural core...</span>
                   </div>
                 )}
+
+                {errorMessage && (
+                  <div className="flex items-center gap-2 p-3 rounded-xl bg-red-950/40 border border-red-500/50 text-xs text-red-300">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                    <span>{errorMessage}</span>
+                  </div>
+                )}
+
                 <div ref={chatEndRef} />
               </div>
 
-              {/* Quick Prompt Chips */}
+              {/* Quick Prompt Chips (Real questions testing context & Hinglish) */}
               <div className="px-4 py-2 flex items-center gap-2 overflow-x-auto border-t border-[#00F5FF]/10 shrink-0">
-                <span className="text-[10px] font-mono text-[#88A0BF] uppercase tracking-wider shrink-0">Quick Commands:</span>
+                <span className="text-[10px] font-mono text-[#88A0BF] uppercase tracking-wider shrink-0">Try Asking:</span>
                 {[
-                  "Torch on karo",
+                  "Torch on kar do",
+                  "Bhai kaise ho? Kya chal raha hai?",
+                  "Set alarm for 6:30 AM",
                   "Call Mom",
-                  "Set alarm for 7 AM",
-                  "Kaise ho boss?",
-                  "Open YouTube",
-                  "Battery status?"
+                  "Quantum computing simple Hindi mein samjhao",
+                  "Tell me a clever Jarvis tech tip"
                 ].map((chip, idx) => (
                   <button
                     key={idx}
@@ -731,7 +807,7 @@ class ActionExecutor(private val context: Context) {
                       ? 'bg-red-500 border-red-400 text-white animate-pulse shadow-[0_0_15px_rgba(239,68,68,0.7)]'
                       : 'bg-[#162136] border-[#00F5FF]/40 text-[#00F5FF] hover:bg-[#00F5FF]/20'
                   }`}
-                  title="Push to Talk"
+                  title={isListening ? "Stop Listening" : `Push to Talk (${voiceLocale})`}
                 >
                   {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                 </button>
@@ -741,7 +817,7 @@ class ActionExecutor(private val context: Context) {
                   value={inputText}
                   onChange={e => setInputText(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleSendCommand()}
-                  placeholder="Ask Nexa in Hindi, Hinglish, or English..."
+                  placeholder="Ask in Hindi, Roman Hindi ('kya haal hai boss'), or English..."
                   className="flex-1 bg-[#162136] border border-[#0A84FF]/30 rounded-xl px-4 py-2.5 text-sm text-[#E6F1FF] focus:outline-none focus:border-[#00F5FF] transition-colors"
                 />
 
@@ -755,13 +831,13 @@ class ActionExecutor(private val context: Context) {
               </div>
             </div>
 
-            {/* Right: Simulated Android Device State & Action Monitor */}
+            {/* Right: Simulated Android Device Hardware State */}
             <div className="w-full lg:w-80 bg-[#0B0F19] p-4 flex flex-col gap-4 overflow-y-auto shrink-0 border-l border-[#00F5FF]/10">
               <div className="flex items-center justify-between pb-2 border-b border-[#00F5FF]/20">
                 <div className="flex items-center gap-2">
                   <Smartphone className="w-4 h-4 text-[#00F5FF]" />
                   <span className="font-mono text-xs font-bold uppercase tracking-wider text-[#E6F1FF]">
-                    Phone Hardware State
+                    Device Hardware State
                   </span>
                 </div>
                 <span className="text-[10px] font-mono text-[#00F5FF] bg-[#00F5FF]/10 px-2 py-0.5 rounded border border-[#00F5FF]/30">
@@ -790,7 +866,7 @@ class ActionExecutor(private val context: Context) {
                     <Clock className="w-4 h-4" />
                     <span className="text-[10px] font-mono font-bold">ACTIVE</span>
                   </div>
-                  <span className="text-xs font-medium">Alarm Clock</span>
+                  <span className="text-xs font-medium">Alarm Engine</span>
                 </div>
               </div>
 
@@ -798,23 +874,24 @@ class ActionExecutor(private val context: Context) {
               <div className="p-3 rounded-xl bg-[#101726] border border-[#00F5FF]/20">
                 <div className="flex items-center gap-1.5 text-xs font-mono text-[#88A0BF] mb-2">
                   <Terminal className="w-3.5 h-3.5 text-[#00F5FF]" />
-                  <span>Last Executed Android Intent:</span>
+                  <span>Gemini Tool Execution Telemetry:</span>
                 </div>
                 <div className="font-mono text-xs text-[#00F5FF] bg-[#080C14] p-2.5 rounded-lg border border-[#00F5FF]/20 break-words">
-                  {simulatedDeviceState.lastAction || 'No phone action executed yet'}
+                  {simulatedDeviceState.lastAction || 'No phone tool triggered yet'}
                 </div>
               </div>
 
-              {/* Android Safety Boundary Notes */}
+              {/* Multilingual & Context Intelligence Notes */}
               <div className="p-3 rounded-xl bg-[#162136]/50 border border-[#88A0BF]/20 text-xs space-y-2">
                 <div className="flex items-center gap-1.5 font-mono text-[#00F5FF] font-semibold">
                   <ShieldCheck className="w-4 h-4" />
-                  <span>Android OS Hard Constraints:</span>
+                  <span>Real Intelligence Capabilities:</span>
                 </div>
                 <ul className="list-disc pl-4 space-y-1 text-[#88A0BF] text-[11px]">
-                  <li>Calls & SMS require interactive user confirmation before triggering Intent.</li>
-                  <li>Direct Wi-Fi / Bluetooth toggle without prompt is restricted on Android 10+; Nexa opens the official Settings.Panel instead.</li>
-                  <li>All Gemini API calls stay verified via Android BuildConfig.</li>
+                  <li>Connected to live Gemini API via secure server-side SDK.</li>
+                  <li>Multi-turn memory retains last 10 conversation turns so pronouns and follow-up queries work.</li>
+                  <li>Native comprehension of Roman Hindi and Hinglish idioms ("kya haal hai", "torch chalu karo").</li>
+                  <li>Tool calls for calls/SMS enforce user confirmation before dialing.</li>
                 </ul>
               </div>
             </div>
@@ -846,9 +923,9 @@ class ActionExecutor(private val context: Context) {
 
               <div className="mt-auto pt-4 border-t border-[#00F5FF]/10">
                 <div className="p-3 rounded-xl bg-[#162136] border border-[#00F5FF]/20 text-xs">
-                  <div className="font-mono text-[#00F5FF] font-bold mb-1">Mobile IDE Tip</div>
+                  <div className="font-mono text-[#00F5FF] font-bold mb-1">Mobile IDE Copy</div>
                   <p className="text-[11px] text-[#88A0BF]">
-                    Tap "Copy Code" on any file below and paste directly into AIDE, AndroidIDE or Termux.
+                    Tap "Copy Full File" on any card below to paste cleanly into your mobile Android IDE.
                   </p>
                 </div>
               </div>
@@ -870,7 +947,6 @@ class ActionExecutor(private val context: Context) {
 
               {filteredFiles.map((file, idx) => (
                 <div key={idx} className="rounded-xl border border-[#00F5FF]/25 bg-[#101726] overflow-hidden shadow-lg">
-                  {/* Card Header */}
                   <div className="px-4 py-2.5 bg-[#162136] border-b border-[#00F5FF]/15 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Terminal className="w-4 h-4 text-[#00F5FF]" />
@@ -899,7 +975,6 @@ class ActionExecutor(private val context: Context) {
                     {file.description}
                   </div>
 
-                  {/* Preformatted Code Box */}
                   <pre className="p-4 text-xs font-mono text-[#E6F1FF] overflow-x-auto leading-relaxed bg-[#080C14]">
                     <code>{file.code}</code>
                   </pre>
@@ -926,14 +1001,14 @@ class ActionExecutor(private val context: Context) {
               <div className="p-4 rounded-xl bg-[#101726] border border-[#00F5FF]/20 space-y-2">
                 <div className="font-mono text-sm text-[#00F5FF] font-bold">1. Voice Layer</div>
                 <p className="text-xs text-[#88A0BF] leading-relaxed">
-                  Dual-locale speech recognition using Android's native <code className="text-[#00F5FF]">SpeechRecognizer</code> with <code className="text-[#00F5FF]">en-IN</code> and <code className="text-[#00F5FF]">hi-IN</code> fallback for natural Hinglish fluency. Push-to-talk first, foreground hotword in Phase 4.
+                  Dual-locale speech recognition using Android's native <code className="text-[#00F5FF]">SpeechRecognizer</code> with <code className="text-[#00F5FF]">hi-IN</code> and <code className="text-[#00F5FF]">en-IN</code> fallback for natural Hinglish fluency. Push-to-talk first, foreground hotword in Phase 4.
                 </p>
               </div>
 
               <div className="p-4 rounded-xl bg-[#101726] border border-[#00F5FF]/20 space-y-2">
                 <div className="font-mono text-sm text-[#00F5FF] font-bold">2. Brain & Function Calling</div>
                 <p className="text-xs text-[#88A0BF] leading-relaxed">
-                  Direct client integration via official <code className="text-[#00F5FF]">com.google.ai.client.generativeai</code> SDK with Gemini 1.5 Flash. Rolling 10-turn memory keeps token usage minimal and responses sub-second.
+                  Direct client integration via official <code className="text-[#00F5FF]">com.google.ai.client.generativeai</code> SDK with Gemini Flash. Rolling 10-turn memory keeps token usage minimal and responses sub-second.
                 </p>
               </div>
 
