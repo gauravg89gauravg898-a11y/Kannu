@@ -1,0 +1,6 @@
+{
+  "name": "NexaOS - Jarvis Voice Assistant",
+  "description": "Jarvis-style AI voice assistant for Android with Gemini function calling, phone automation, and conversational intelligence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
